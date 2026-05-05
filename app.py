@@ -77,43 +77,59 @@ def load_model(arch, method):
         return None
 
     try:
-        state_dict = torch.load(path, map_location=device, weights_only=False)
-
-        # 🔍 ambil key pertama
-        first_key = list(state_dict.keys())[0]
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
 
         # ======================
-        # DETECT DENSENET
+        # HANDLE FORMAT BERBEDA
         # ======================
-        if "denseblock" in first_key:
-            st.success("✅ Model: DenseNet terdeteksi")
-            model = models.densenet121(weights=None)
-            model.classifier = nn.Linear(model.classifier.in_features, 3)
+        if isinstance(checkpoint, dict):
 
-        # ======================
-        # DETECT MOBILENET
-        # ======================
-        elif "features.0.0.weight" in first_key:
-            st.success("✅ Model: MobileNet terdeteksi")
-            model = models.mobilenet_v3_large(weights=None)
-            model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
+            if "model_state_dict" in checkpoint:
+                state_dict = checkpoint["model_state_dict"]
 
-        # ======================
-        # DETECT EFFICIENTNET
-        # ======================
-        elif "features.0.weight" in first_key:
-            st.success("✅ Model: EfficientNet terdeteksi")
-            model = models.efficientnet_b0(weights=None)
-            model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
+            elif "state_dict" in checkpoint:
+                state_dict = checkpoint["state_dict"]
+
+            else:
+                state_dict = checkpoint
 
         else:
-            st.error("❌ Tidak bisa deteksi model")
+            st.error("❌ Model bukan state_dict")
             return None
 
-        model.load_state_dict(state_dict, strict=False)
+        # 🔍 DEBUG WAJIB
+        first_key = list(state_dict.keys())[0]
+        st.write("DEBUG KEY:", first_key)
 
+        # ======================
+        # DETEKSI MODEL
+        # ======================
+        if "denseblock" in first_key:
+            model = models.densenet121(weights=None)
+            model.classifier = nn.Linear(model.classifier.in_features, 3)
+            st.success("✅ DenseNet terdeteksi")
+
+        elif "features.0.0.weight" in first_key:
+            model = models.mobilenet_v3_large(weights=None)
+            model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
+            st.success("✅ MobileNet terdeteksi")
+
+        elif "features.0.weight" in first_key:
+            model = models.efficientnet_b0(weights=None)
+            model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
+            st.success("✅ EfficientNet terdeteksi")
+
+        else:
+            st.error(f"❌ Tidak dikenali: {first_key}")
+            return None
+
+        # ======================
+        # LOAD (SAFE)
+        # ======================
+        model.load_state_dict(state_dict, strict=False)
         model.to(device)
         model.eval()
+
         return model
 
     except Exception as e:
