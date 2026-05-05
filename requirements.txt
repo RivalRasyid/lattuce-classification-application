@@ -3,7 +3,7 @@ torch
 torchvision
 numpy
 pillow
-matplotlib
 pandas
 altair
 pytorch-grad-cam
+gdown
