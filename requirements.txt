@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 streamlit
 torch
 torchvision
@@ -7,3 +8,15 @@ matplotlib
 pandas
 altair
 pytorch-grad-cam
+=======
+streamlit
+torch==2.0.1
+torchvision==0.15.2
+pillow
+numpy
+matplotlib
+pandas
+altair
+gdown
+pytorch-grad-cam
+>>>>>>> e15433cfe8ed0b340a206c0b4e49e7ebad736174
