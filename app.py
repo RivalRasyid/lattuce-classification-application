@@ -17,6 +17,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 # CONFIG
 # ======================
 st.set_page_config(page_title="Selada Classifier", layout="wide")
+st.write("🔥 VERSION FIX FINAL")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class_names = ['Bacterial', 'Fungal', 'Healthy']
@@ -45,7 +46,7 @@ MODEL_LINKS = {
 }
 
 # ======================
-# DOWNLOAD MODEL
+# DOWNLOAD MODEL (FIX)
 # ======================
 def download_model(file_id, output):
     os.makedirs("models", exist_ok=True)
@@ -66,12 +67,12 @@ def download_model(file_id, output):
         os.remove(output)
 
         if b"<html" in head:
-            raise ValueError("❌ File Google Drive belum public / salah link")
+            raise ValueError("❌ File Google Drive belum public")
         else:
             raise ValueError("❌ File corrupt")
 
 # ======================
-# BUILD MODEL
+# BUILD MODEL (FIX MOBILENET)
 # ======================
 def build_model(arch):
     if arch == "DenseNet121":
@@ -92,12 +93,19 @@ def build_model(arch):
 
     elif arch == "MobileNetV3":
         model = models.mobilenet_v3_large(weights=None)
-        model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
+
+        # 🔥 FIX mismatch (960 → 1024)
+        model.classifier = nn.Sequential(
+            nn.Linear(960, 1024),
+            nn.Hardswish(),
+            nn.Dropout(0.2),
+            nn.Linear(1024, 3)
+        )
 
     return model
 
 # ======================
-# LOAD MODEL (FIX FINAL)
+# LOAD MODEL (FIX TOTAL)
 # ======================
 def load_model(arch, method):
     st.write(f"🔄 Loading: {arch} - {method}")
@@ -111,19 +119,16 @@ def load_model(arch, method):
         obj = torch.load(
             path,
             map_location=device,
-            weights_only=False  # 🔥 fix PyTorch 2.6+
+            weights_only=False
         )
 
-        # HANDLE FORMAT MODEL
         if isinstance(obj, dict):
-            model.load_state_dict(obj, strict=False)
+            model.load_state_dict(obj, strict=False)  # 🔥 anti crash
         else:
             model = obj
 
     except Exception as e:
         st.error(f"❌ Load gagal: {e}")
-        with open(path, "rb") as f:
-            st.write("Preview file:", f.read(100))
         st.stop()
 
     model.to(device)
@@ -134,7 +139,6 @@ def load_model(arch, method):
 # UI
 # ======================
 st.title("🌿 Klasifikasi Penyakit Daun Selada")
-st.caption("Deep Learning + Grad-CAM")
 
 col1, col2 = st.columns(2)
 
@@ -151,7 +155,6 @@ with col2:
     )
 
 model = load_model(selected_model, selected_method)
-validator_model = load_model("EfficientNetB0", "Partial Unfreeze")
 
 uploaded_file = st.file_uploader("Upload gambar", type=["jpg","png","jpeg"])
 
@@ -177,7 +180,7 @@ if uploaded_file:
         st.write(f"Confidence: {np.max(probs_np):.4f}")
 
     # ======================
-    # GRAD-CAM (SAFE)
+    # GRAD-CAM
     # ======================
     st.divider()
     st.subheader("🔥 Grad-CAM")
