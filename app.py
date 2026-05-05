@@ -71,52 +71,46 @@ def download_model(file_id, output):
 # ======================
 def load_model(arch, method):
 
-    st.write(f"🔄 Loading: {arch} - {method}")
-
     path = f"models/{arch}_{method}.pth"
 
     if not download_model(MODEL_LINKS[(arch, method)], path):
         return None
 
     try:
-        obj = torch.load(path, map_location=device, weights_only=False)
+        state_dict = torch.load(path, map_location=device, weights_only=False)
+
+        # 🔍 ambil key pertama
+        first_key = list(state_dict.keys())[0]
 
         # ======================
-        # FULL MODEL
+        # DETECT DENSENET
         # ======================
-        if not isinstance(obj, dict):
-            st.success("✅ Full model detected")
-            model = obj
+        if "denseblock" in first_key:
+            st.success("✅ Model: DenseNet terdeteksi")
+            model = models.densenet121(weights=None)
+            model.classifier = nn.Linear(model.classifier.in_features, 3)
 
         # ======================
-        # STATE_DICT
+        # DETECT MOBILENET
         # ======================
+        elif "features.0.0.weight" in first_key:
+            st.success("✅ Model: MobileNet terdeteksi")
+            model = models.mobilenet_v3_large(weights=None)
+            model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
+
+        # ======================
+        # DETECT EFFICIENTNET
+        # ======================
+        elif "features.0.weight" in first_key:
+            st.success("✅ Model: EfficientNet terdeteksi")
+            model = models.efficientnet_b0(weights=None)
+            model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
+
         else:
-            keys = list(obj.keys())[0]
+            st.error("❌ Tidak bisa deteksi model")
+            return None
 
-            # 🔍 DETECT DenseNet
-            if "denseblock" in keys:
-                st.info("Detected: DenseNet")
-                model = models.densenet121(weights=None)
-                model.classifier = nn.Linear(model.classifier.in_features, 3)
-                model.load_state_dict(obj)
-
-            # 🔍 DETECT EfficientNet / MobileNet
-            elif "features" in keys:
-                st.info("Detected: EfficientNet/MobileNet")
-
-                try:
-                    model = models.efficientnet_b0(weights=None)
-                    model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
-                    model.load_state_dict(obj)
-                except:
-                    model = models.mobilenet_v3_large(weights=None)
-                    model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
-                    model.load_state_dict(obj)
-
-            else:
-                st.error("❌ Unknown model format")
-                return None
+        model.load_state_dict(state_dict, strict=False)
 
         model.to(device)
         model.eval()
@@ -125,7 +119,6 @@ def load_model(arch, method):
     except Exception as e:
         st.error(f"❌ Load gagal: {e}")
         return None
-
 # ======================
 # UI
 # ======================
