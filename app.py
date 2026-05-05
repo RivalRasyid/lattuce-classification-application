@@ -17,7 +17,6 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 # CONFIG
 # ======================
 st.set_page_config(page_title="Selada Classifier", layout="wide")
-st.write("🔥 FINAL FIX (UI STABLE + SAFE LOADING)")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class_names = ['Bacterial', 'Fungal', 'Healthy']
@@ -50,24 +49,34 @@ MODEL_LINKS = {
 # ======================
 def download_model(file_id, output):
     os.makedirs("models", exist_ok=True)
-
     url = f"https://drive.google.com/uc?id={file_id}"
 
     if not os.path.exists(output):
-        st.info("⬇️ Downloading model...")
         gdown.download(url, output, quiet=False)
 
-    size = os.path.getsize(output)
-    st.caption(f"📦 Size: {size/1024/1024:.2f} MB")
-
-    if size < 2_000_000:
-        st.error("❌ File model tidak valid")
-        return False
-
-    return True
+    return os.path.exists(output)
 
 # ======================
-# LOAD MODEL (SAFE)
+# BUILD MODEL DEFAULT
+# ======================
+def build_model(arch):
+
+    if arch == "DenseNet121":
+        model = models.densenet121(weights=None)
+        model.classifier = nn.Linear(model.classifier.in_features, 3)
+
+    elif arch == "EfficientNetB0":
+        model = models.efficientnet_b0(weights=None)
+        model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
+
+    elif arch == "MobileNetV3":
+        model = models.mobilenet_v3_large(weights=None)
+        model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
+
+    return model
+
+# ======================
+# LOAD MODEL (ROBUST)
 # ======================
 def load_model(arch, method):
 
@@ -79,62 +88,32 @@ def load_model(arch, method):
     try:
         checkpoint = torch.load(path, map_location=device, weights_only=False)
 
-        # ======================
-        # HANDLE FORMAT BERBEDA
-        # ======================
         if isinstance(checkpoint, dict):
 
             if "model_state_dict" in checkpoint:
                 state_dict = checkpoint["model_state_dict"]
-
             elif "state_dict" in checkpoint:
                 state_dict = checkpoint["state_dict"]
-
             else:
                 state_dict = checkpoint
 
         else:
-            st.error("❌ Model bukan state_dict")
             return None
 
-        # 🔍 DEBUG WAJIB
-        first_key = list(state_dict.keys())[0]
-        st.write("DEBUG KEY:", first_key)
+        # 🔥 build sesuai pilihan user (bukan auto detect lagi)
+        model = build_model(arch)
 
-        # ======================
-        # DETEKSI MODEL
-        # ======================
-        if "denseblock" in first_key:
-            model = models.densenet121(weights=None)
-            model.classifier = nn.Linear(model.classifier.in_features, 3)
-            st.success("✅ DenseNet terdeteksi")
-
-        elif "features.0.0.weight" in first_key:
-            model = models.mobilenet_v3_large(weights=None)
-            model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
-            st.success("✅ MobileNet terdeteksi")
-
-        elif "features.0.weight" in first_key:
-            model = models.efficientnet_b0(weights=None)
-            model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
-            st.success("✅ EfficientNet terdeteksi")
-
-        else:
-            st.error(f"❌ Tidak dikenali: {first_key}")
-            return None
-
-        # ======================
-        # LOAD (SAFE)
-        # ======================
+        # 🔥 load fleksibel (anti error)
         model.load_state_dict(state_dict, strict=False)
+
         model.to(device)
         model.eval()
 
         return model
 
-    except Exception as e:
-        st.error(f"❌ Load gagal: {e}")
+    except:
         return None
+
 # ======================
 # UI
 # ======================
@@ -154,18 +133,15 @@ with col2:
         ["Full Freeze","Partial Unfreeze"]
     )
 
-# ======================
-# LOAD MODEL
-# ======================
 model = load_model(selected_model, selected_method)
 
 # ======================
-# UPLOAD GAMBAR (SELALU ADA)
+# UPLOAD
 # ======================
 uploaded_file = st.file_uploader("Upload gambar", type=["jpg","png","jpeg"])
 
 # ======================
-# PREDIKSI
+# INFERENSI
 # ======================
 if uploaded_file and model is not None:
 
@@ -193,7 +169,7 @@ if uploaded_file and model is not None:
     # GRAD-CAM
     # ======================
     st.divider()
-    st.subheader("🔥 Grad-CAM")
+    st.subheader("Grad-CAM")
 
     try:
         target_layers = [model.features[-1]]
@@ -239,4 +215,4 @@ if uploaded_file and model is not None:
     st.altair_chart(chart, use_container_width=True)
 
 elif uploaded_file and model is None:
-    st.warning("⚠️ Model gagal load → tidak bisa prediksi")
+    st.warning("Model tidak bisa digunakan")
