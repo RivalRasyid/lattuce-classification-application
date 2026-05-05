@@ -93,13 +93,12 @@ def build_model(arch):
 
     elif arch == "MobileNetV3":
     model = models.mobilenet_v3_large(weights=None)
-
     model.classifier = nn.Sequential(
-        nn.Linear(1024, 1280),   # 🔥 FIX (dibalik)
-        nn.Hardswish(),
-        nn.Dropout(0.2),
-        nn.Linear(1280, 3)
-    )
+            nn.Linear(1024, 1280),   # 🔥 FIX (dibalik)
+            nn.Hardswish(),
+            nn.Dropout(0.2),
+            nn.Linear(1280, 3)
+        )
 
     return model
 
