@@ -1,22 +1,11 @@
-<<<<<<< HEAD
 streamlit
-torch
-torchvision
-numpy
-pillow
-matplotlib
-pandas
-altair
-pytorch-grad-cam
-=======
-streamlit
-torch==2.0.1
-torchvision==0.15.2
+torch==2.9.0
+torchvision==0.24.0
 pillow
 numpy
 matplotlib
 pandas
 altair
 gdown
-pytorch-grad-cam
->>>>>>> e15433cfe8ed0b340a206c0b4e49e7ebad736174
+
+git+https://github.com/jacobgil/pytorch-grad-cam.git
