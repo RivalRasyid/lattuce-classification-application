@@ -14,6 +14,12 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
 # ======================
+# FIX RANDOM (BIAR STABIL)
+# ======================
+torch.manual_seed(42)
+np.random.seed(42)
+
+# ======================
 # CONFIG
 # ======================
 st.set_page_config(page_title="Selada Classifier", layout="wide")
@@ -57,7 +63,7 @@ def download_model(file_id, output):
     return os.path.exists(output)
 
 # ======================
-# BUILD MODEL DEFAULT
+# BUILD MODEL
 # ======================
 def build_model(arch):
 
@@ -76,7 +82,7 @@ def build_model(arch):
     return model
 
 # ======================
-# LOAD MODEL (ROBUST)
+# LOAD MODEL (FIXED)
 # ======================
 def load_model(arch, method):
 
@@ -88,23 +94,24 @@ def load_model(arch, method):
     try:
         checkpoint = torch.load(path, map_location=device, weights_only=False)
 
+        # handle berbagai format
         if isinstance(checkpoint, dict):
-
             if "model_state_dict" in checkpoint:
                 state_dict = checkpoint["model_state_dict"]
             elif "state_dict" in checkpoint:
                 state_dict = checkpoint["state_dict"]
             else:
                 state_dict = checkpoint
-
         else:
             return None
 
-        # 🔥 build sesuai pilihan user (bukan auto detect lagi)
         model = build_model(arch)
 
-        # 🔥 load fleksibel (anti error)
-        model.load_state_dict(state_dict, strict=False)
+        # 🔥 LOAD DENGAN 2 STEP (INI KUNCI)
+        try:
+            model.load_state_dict(state_dict, strict=True)
+        except:
+            model.load_state_dict(state_dict, strict=False)
 
         model.to(device)
         model.eval()
@@ -153,6 +160,9 @@ if uploaded_file and model is not None:
         st.image(image, caption="Input", use_container_width=True)
 
     input_tensor = transform(image).unsqueeze(0).to(device)
+
+    # 🔥 PASTIKAN MODE EVAL
+    model.eval()
 
     with torch.no_grad():
         output = model(input_tensor)
