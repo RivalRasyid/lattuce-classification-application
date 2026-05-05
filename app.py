@@ -17,7 +17,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 # CONFIG
 # ======================
 st.set_page_config(page_title="Selada Classifier", layout="wide")
-st.write("🔥 FINAL FIX (ACCURACY RESTORED)")
+st.write("🔥 FINAL FIX (UI STABLE + SAFE LOADING)")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class_names = ['Bacterial', 'Fungal', 'Healthy']
@@ -62,74 +62,49 @@ def download_model(file_id, output):
 
     if size < 2_000_000:
         st.error("❌ File model tidak valid")
-        st.stop()
+        return False
+
+    return True
 
 # ======================
-# BUILD MODEL (HARUS IDENTIK DENGAN TRAINING)
-# ======================
-def build_model(arch):
-
-    if arch == "DenseNet121":
-        model = models.densenet121(weights=None)
-        model.classifier = nn.Sequential(
-            nn.Linear(model.classifier.in_features, 1280),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(1280, 3)
-        )
-
-    elif arch == "EfficientNetB0":
-        model = models.efficientnet_b0(weights=None)
-        model.classifier = nn.Sequential(
-            nn.Dropout(0.2),
-            nn.Linear(model.classifier[1].in_features, 3)
-        )
-
-    elif arch == "MobileNetV3":
-        model = models.mobilenet_v3_large(weights=None)
-
-        # 🔥 SESUAI CHECKPOINT (INI YANG BENER)
-        model.classifier = nn.Sequential(
-            nn.Linear(1024, 1280),
-            nn.Hardswish(),
-            nn.Dropout(0.2),
-            nn.Linear(1280, 3)
-        )
-
-    return model
-
-# ======================
-# LOAD MODEL (NO DAMAGE)
+# LOAD MODEL (SAFE)
 # ======================
 def load_model(arch, method):
 
     st.write(f"🔄 Loading: {arch} - {method}")
 
     path = f"models/{arch}_{method}.pth"
-    download_model(MODEL_LINKS[(arch, method)], path)
+
+    if not download_model(MODEL_LINKS[(arch, method)], path):
+        return None
 
     try:
         obj = torch.load(path, map_location=device, weights_only=False)
 
-        # 🔥 CASE 1: FULL MODEL
+        # ======================
+        # FULL MODEL
+        # ======================
         if not isinstance(obj, dict):
             st.success("✅ Full model detected")
             model = obj
 
-        # 🔥 CASE 2: STATE_DICT → AUTO DETECT
+        # ======================
+        # STATE_DICT
+        # ======================
         else:
             keys = list(obj.keys())[0]
 
-            # 🔥 DETEKSI OTOMATIS
+            # 🔍 DETECT DenseNet
             if "denseblock" in keys:
                 st.info("Detected: DenseNet")
                 model = models.densenet121(weights=None)
                 model.classifier = nn.Linear(model.classifier.in_features, 3)
+                model.load_state_dict(obj)
 
-            elif "features.1.0.block" in keys:
-                st.info("Detected: EfficientNet/MobileNet style")
+            # 🔍 DETECT EfficientNet / MobileNet
+            elif "features" in keys:
+                st.info("Detected: EfficientNet/MobileNet")
 
-                # coba efficientnet dulu
                 try:
                     model = models.efficientnet_b0(weights=None)
                     model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
@@ -139,21 +114,17 @@ def load_model(arch, method):
                     model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
                     model.load_state_dict(obj)
 
-                return model.to(device).eval()
-
             else:
                 st.error("❌ Unknown model format")
-                st.stop()
+                return None
 
-            model.load_state_dict(obj)
+        model.to(device)
+        model.eval()
+        return model
 
     except Exception as e:
         st.error(f"❌ Load gagal: {e}")
-        st.stop()
-
-    model.to(device)
-    model.eval()
-    return model
+        return None
 
 # ======================
 # UI
@@ -174,11 +145,21 @@ with col2:
         ["Full Freeze","Partial Unfreeze"]
     )
 
+# ======================
+# LOAD MODEL
+# ======================
 model = load_model(selected_model, selected_method)
 
+# ======================
+# UPLOAD GAMBAR (SELALU ADA)
+# ======================
 uploaded_file = st.file_uploader("Upload gambar", type=["jpg","png","jpeg"])
 
-if uploaded_file:
+# ======================
+# PREDIKSI
+# ======================
+if uploaded_file and model is not None:
+
     image = Image.open(uploaded_file).convert("RGB")
 
     colA, colB = st.columns(2)
@@ -247,3 +228,6 @@ if uploaded_file:
     )
 
     st.altair_chart(chart, use_container_width=True)
+
+elif uploaded_file and model is None:
+    st.warning("⚠️ Model gagal load → tidak bisa prediksi")
