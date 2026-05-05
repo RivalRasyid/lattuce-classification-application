@@ -1,0 +1,1 @@
+# lattuce-classification-application
