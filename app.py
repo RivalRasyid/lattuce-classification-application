@@ -108,17 +108,47 @@ def load_model(arch, method):
     path = f"models/{arch}_{method}.pth"
     download_model(MODEL_LINKS[(arch, method)], path)
 
-    model = build_model(arch)
-
     try:
-        state_dict = torch.load(path, map_location=device)
+        obj = torch.load(path, map_location=device, weights_only=False)
 
-        # 🔥 LOAD WAJIB STRICT TRUE
-        model.load_state_dict(state_dict, strict=True)
+        # 🔥 CASE 1: FULL MODEL
+        if not isinstance(obj, dict):
+            st.success("✅ Full model detected")
+            model = obj
+
+        # 🔥 CASE 2: STATE_DICT → AUTO DETECT
+        else:
+            keys = list(obj.keys())[0]
+
+            # 🔥 DETEKSI OTOMATIS
+            if "denseblock" in keys:
+                st.info("Detected: DenseNet")
+                model = models.densenet121(weights=None)
+                model.classifier = nn.Linear(model.classifier.in_features, 3)
+
+            elif "features.1.0.block" in keys:
+                st.info("Detected: EfficientNet/MobileNet style")
+
+                # coba efficientnet dulu
+                try:
+                    model = models.efficientnet_b0(weights=None)
+                    model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
+                    model.load_state_dict(obj)
+                except:
+                    model = models.mobilenet_v3_large(weights=None)
+                    model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
+                    model.load_state_dict(obj)
+
+                return model.to(device).eval()
+
+            else:
+                st.error("❌ Unknown model format")
+                st.stop()
+
+            model.load_state_dict(obj)
 
     except Exception as e:
-        st.error(f"❌ Model tidak cocok dengan arsitektur!")
-        st.write(e)
+        st.error(f"❌ Load gagal: {e}")
         st.stop()
 
     model.to(device)
