@@ -17,7 +17,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image
 # CONFIG
 # ======================
 st.set_page_config(page_title="Selada Classifier", layout="wide")
-st.write("🔥 VERSION FIX FINAL")
+st.write("🔥 FINAL FIX (ACCURACY RESTORED)")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class_names = ['Bacterial', 'Fungal', 'Healthy']
@@ -46,7 +46,7 @@ MODEL_LINKS = {
 }
 
 # ======================
-# DOWNLOAD MODEL (FIX)
+# DOWNLOAD MODEL
 # ======================
 def download_model(file_id, output):
     os.makedirs("models", exist_ok=True)
@@ -61,20 +61,14 @@ def download_model(file_id, output):
     st.caption(f"📦 Size: {size/1024/1024:.2f} MB")
 
     if size < 2_000_000:
-        with open(output, "rb") as f:
-            head = f.read(500).lower()
-
-        os.remove(output)
-
-        if b"<html" in head:
-            raise ValueError("❌ File Google Drive belum public")
-        else:
-            raise ValueError("❌ File corrupt")
+        st.error("❌ File model tidak valid")
+        st.stop()
 
 # ======================
-# BUILD MODEL (FIX MOBILENET)
+# BUILD MODEL (HARUS IDENTIK DENGAN TRAINING)
 # ======================
 def build_model(arch):
+
     if arch == "DenseNet121":
         model = models.densenet121(weights=None)
         model.classifier = nn.Sequential(
@@ -93,8 +87,10 @@ def build_model(arch):
 
     elif arch == "MobileNetV3":
         model = models.mobilenet_v3_large(weights=None)
+
+        # 🔥 SESUAI CHECKPOINT (INI YANG BENER)
         model.classifier = nn.Sequential(
-            nn.Linear(1024, 1280),   # 🔥 FIX (dibalik)
+            nn.Linear(1024, 1280),
             nn.Hardswish(),
             nn.Dropout(0.2),
             nn.Linear(1280, 3)
@@ -103,30 +99,26 @@ def build_model(arch):
     return model
 
 # ======================
-# LOAD MODEL (FIX TOTAL)
+# LOAD MODEL (NO DAMAGE)
 # ======================
 def load_model(arch, method):
+
     st.write(f"🔄 Loading: {arch} - {method}")
 
-    model = build_model(arch)
     path = f"models/{arch}_{method}.pth"
-
     download_model(MODEL_LINKS[(arch, method)], path)
 
-    try:
-        obj = torch.load(
-            path,
-            map_location=device,
-            weights_only=False
-        )
+    model = build_model(arch)
 
-        if isinstance(obj, dict):
-            model.load_state_dict(obj, strict=False)  # 🔥 anti crash
-        else:
-            model = obj
+    try:
+        state_dict = torch.load(path, map_location=device)
+
+        # 🔥 LOAD WAJIB STRICT TRUE
+        model.load_state_dict(state_dict, strict=True)
 
     except Exception as e:
-        st.error(f"❌ Load gagal: {e}")
+        st.error(f"❌ Model tidak cocok dengan arsitektur!")
+        st.write(e)
         st.stop()
 
     model.to(device)
