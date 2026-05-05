@@ -50,14 +50,15 @@ MODEL_LINKS = {
 def download_model(file_id, output):
     os.makedirs("models", exist_ok=True)
 
+    url = f"https://drive.google.com/uc?id={file_id}"
+
     if not os.path.exists(output):
         st.info("⬇️ Downloading model...")
-        gdown.download(id=file_id, output=output, quiet=False, fuzzy=True)
+        gdown.download(url, output, quiet=False)
 
     size = os.path.getsize(output)
     st.caption(f"📦 Size: {size/1024/1024:.2f} MB")
 
-    # VALIDASI FILE
     if size < 2_000_000:
         with open(output, "rb") as f:
             head = f.read(500).lower()
@@ -65,9 +66,9 @@ def download_model(file_id, output):
         os.remove(output)
 
         if b"<html" in head:
-            raise ValueError("File dari Google Drive bukan model (HTML). Pastikan file PUBLIC.")
+            raise ValueError("❌ File Google Drive belum public / salah link")
         else:
-            raise ValueError("File corrupt / bukan .pth")
+            raise ValueError("❌ File corrupt")
 
 # ======================
 # BUILD MODEL
