@@ -1,9 +1,10 @@
 streamlit
-torch
-torchvision
-numpy
+torch==2.2.0
+torchvision==0.17.0
 pillow
+numpy
+matplotlib
 pandas
 altair
-pytorch-grad-cam
 gdown
+pytorch-grad-cam
