@@ -173,48 +173,62 @@ def build_base_model(arch):
 # LOAD MODEL (ROBUST)
 # ======================
 @st.cache_resource
-def load_model(arch_ui, method):
+def load_model(arch, method):
 
-    path = f"models/{arch_ui}_{method}.pth"
+    path = f"models/{arch}_{method}.pth"
 
-    if not download_model(MODEL_LINKS[(arch_ui, method)], path):
+    if not download_model(MODEL_LINKS[(arch, method)], path):
         return None
 
-    # 1) coba FULL MODEL
     try:
-        m = torch.load(path, map_location=device)
-        if hasattr(m, "eval"):
-            m.to(device).eval()
-            return m
-    except:
-        pass
+        state_dict = torch.load(path, map_location=device)
 
-    # 2) state_dict
-    try:
-        ckpt = torch.load(path, map_location=device, weights_only=False)
-        sd = extract_state_dict(ckpt)
-        if sd is None:
-            return None
+        # ======================
+        # 🔥 KHUSUS DENSENET
+        # ======================
+        if arch == "DenseNet121":
+            model = models.densenet121(weights=None)
 
-        # deteksi arsitektur DARI FILE (bukan dari dropdown)
-        arch = infer_arch_from_keys(sd)
-        if arch is None:
-            return None
+            # 🔥 SESUAIKAN CLASSIFIER DARI WEIGHT
+            in_features = state_dict["classifier.weight"].shape[1]
+            out_features = state_dict["classifier.weight"].shape[0]
 
-        model = build_base_model(arch)
-        if model is None:
-            return None
+            model.classifier = nn.Linear(in_features, out_features)
 
-        # sesuaikan classifier dengan bobot
-        model = adapt_classifier_from_state_dict(model, arch, sd, num_classes=len(class_names))
+        # ======================
+        # 🔥 EFFICIENTNET
+        # ======================
+        elif arch == "EfficientNetB0":
+            model = models.efficientnet_b0(weights=None)
 
-        # sekarang harus bisa strict=True
-        model.load_state_dict(sd, strict=True)
+            in_features = state_dict["classifier.1.weight"].shape[1]
+            out_features = state_dict["classifier.1.weight"].shape[0]
 
-        model.to(device).eval()
+            model.classifier[1] = nn.Linear(in_features, out_features)
+
+        # ======================
+        # 🔥 MOBILENET
+        # ======================
+        elif arch == "MobileNetV3":
+            model = models.mobilenet_v3_large(weights=None)
+
+            in_features = state_dict["classifier.3.weight"].shape[1]
+            out_features = state_dict["classifier.3.weight"].shape[0]
+
+            model.classifier[3] = nn.Linear(in_features, out_features)
+
+        # ======================
+        # LOAD (WAJIB STRICT TRUE)
+        # ======================
+        model.load_state_dict(state_dict, strict=True)
+
+        model.to(device)
+        model.eval()
+
         return model
 
     except Exception as e:
+        st.error(f"Gagal load: {e}")
         return None
 
 # ======================
