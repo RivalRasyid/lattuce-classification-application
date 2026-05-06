@@ -1,9 +1,8 @@
 import streamlit as st
 import torch
-import torch.nn as nn
 import numpy as np
 from PIL import Image
-from torchvision import transforms, models
+from torchvision import transforms
 import os
 import gdown
 
@@ -12,11 +11,8 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
 # ======================
-# STABIL
+# CONFIG
 # ======================
-torch.manual_seed(42)
-np.random.seed(42)
-
 st.set_page_config(page_title="Selada Classifier", layout="wide")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -44,17 +40,19 @@ MODEL_LINKS = {
 }
 
 # ======================
-# DOWNLOAD
+# DOWNLOAD MODEL
 # ======================
 def download_model(file_id, output):
     os.makedirs("models", exist_ok=True)
     url = f"https://drive.google.com/uc?id={file_id}"
+
     if not os.path.exists(output):
         gdown.download(url, output, quiet=False)
+
     return os.path.exists(output)
 
 # ======================
-# LOAD MODEL FINAL FIX
+# LOAD MODEL (FINAL CLEAN)
 # ======================
 @st.cache_resource
 def load_model(arch, method):
@@ -64,74 +62,29 @@ def load_model(arch, method):
     if not download_model(MODEL_LINKS[(arch, method)], path):
         return None
 
+    # ======================
+    # 1. TRY FULL MODEL
+    # ======================
     try:
-        state_dict = torch.load(path, map_location=device)
+        model = torch.load(path, map_location=device)
 
-        # ======================
-        # 🔥 AUTO DETECT CLASSIFIER
-        # ======================
-        classifier_keys = [k for k in state_dict.keys() if "classifier" in k and "weight" in k]
+        if hasattr(model, "eval"):
+            model.to(device)
+            model.eval()
+            return model
+    except:
+        pass
 
-        if len(classifier_keys) == 0:
-            st.error("Classifier tidak ditemukan")
+    # ======================
+    # 2. TRY STATE_DICT TANPA MODIFIKASI
+    # ======================
+    try:
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
+
+        # kalau cuma state_dict → TIDAK DIPAKSA
+        if isinstance(checkpoint, dict):
+            st.error("Model ini bukan full model. Tidak bisa digunakan tanpa arsitektur asli.")
             return None
-
-        # urutkan berdasarkan index
-        classifier_keys.sort()
-
-        # ======================
-        # BUILD BASE MODEL
-        # ======================
-        if arch == "DenseNet121":
-            model = models.densenet121(weights=None)
-
-        elif arch == "EfficientNetB0":
-            model = models.efficientnet_b0(weights=None)
-
-        elif arch == "MobileNetV3":
-            model = models.mobilenet_v3_large(weights=None)
-
-        # ======================
-        # 🔥 BUILD CLASSIFIER DINAMIS
-        # ======================
-        layers = []
-
-        for key in classifier_keys:
-            w = state_dict[key]
-            out_f, in_f = w.shape
-
-            layers.append(nn.Linear(in_f, out_f))
-
-        # kalau lebih dari 1 layer → jadikan Sequential
-        if len(layers) > 1:
-            classifier = nn.Sequential(*layers)
-        else:
-            classifier = layers[0]
-
-        # assign ke model
-        if arch == "DenseNet121":
-            model.classifier = classifier
-
-        elif arch == "EfficientNetB0":
-            model.classifier = nn.Sequential(nn.Dropout(0.2), classifier)
-
-        elif arch == "MobileNetV3":
-            model.classifier = nn.Sequential(
-                nn.Linear(layers[0].in_features, layers[0].in_features),
-                nn.Hardswish(),
-                nn.Dropout(0.2),
-                classifier
-            )
-
-        # ======================
-        # LOAD STATE_DICT
-        # ======================
-        model.load_state_dict(state_dict, strict=False)
-
-        model.to(device)
-        model.eval()
-
-        return model
 
     except Exception as e:
         st.error(f"Gagal load: {e}")
@@ -175,8 +128,8 @@ if uploaded_file and model is not None:
     input_tensor = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        out = model(input_tensor)
-        probs = torch.softmax(out, dim=1)[0]
+        output = model(input_tensor)
+        probs = torch.softmax(output, dim=1)[0]
 
     probs_np = probs.cpu().numpy()
     pred_class = int(np.argmax(probs_np))
