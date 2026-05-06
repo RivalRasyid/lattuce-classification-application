@@ -65,85 +65,156 @@ def download_model(file_id, output):
     if not os.path.exists(output):
         return False
 
-    # validasi ukuran file
+    # basic sanity check
     size = os.path.getsize(output)
-    if size < 5_000_000:
+    if size < 5_000_000:  # <5MB biasanya bukan weight valid
         return False
 
     return True
 
 # ======================
-# BUILD MODEL (FALLBACK SAJA)
+# UTIL: ambil state_dict apapun formatnya
 # ======================
-def build_model(arch):
+def extract_state_dict(checkpoint):
+    if isinstance(checkpoint, dict):
+        if "model_state_dict" in checkpoint:
+            return checkpoint["model_state_dict"]
+        if "state_dict" in checkpoint:
+            return checkpoint["state_dict"]
+        return checkpoint
+    return None
 
-    if arch == "DenseNet121":
-        model = models.densenet121(weights=None)
-        model.classifier = nn.Linear(model.classifier.in_features, 3)
+# ======================
+# UTIL: infer arsitektur dari key
+# ======================
+def infer_arch_from_keys(state_dict):
+    k = next(iter(state_dict.keys()))
+    # DenseNet
+    if "denseblock" in k:
+        return "densenet"
+    # MobileNetV3 biasanya punya fitur conv awal "features.0.0.weight"
+    if k.startswith("features.0.0.") or ".block." in k:
+        return "mobilenet_v3"
+    # EfficientNetB0 biasanya "features.0.weight" / "features.1.0.block"
+    if k.startswith("features.0.") or ".blocks." in k:
+        return "efficientnet_b0"
+    return None
 
-    elif arch == "EfficientNetB0":
-        model = models.efficientnet_b0(weights=None)
-        model.classifier[1] = nn.Linear(model.classifier[1].in_features, 3)
+# ======================
+# UTIL: sesuaikan classifier dari weight checkpoint
+# ======================
+def adapt_classifier_from_state_dict(model, arch, state_dict, num_classes):
+    """
+    Tujuan: bikin layer classifier punya shape yang sama dengan checkpoint,
+    supaya strict=True bisa lolos.
+    """
+    # cari key weight classifier terakhir
+    # DenseNet: "classifier.weight"
+    # EfficientNet: "classifier.1.weight"
+    # MobileNetV3: "classifier.3.weight"
+    weight_key = None
+    for k in state_dict.keys():
+        if k.endswith("classifier.weight") or k.endswith("classifier.1.weight") or k.endswith("classifier.3.weight"):
+            weight_key = k
 
-    elif arch == "MobileNetV3":
-        model = models.mobilenet_v3_large(weights=None)
-        model.classifier[3] = nn.Linear(model.classifier[3].in_features, 3)
+    # fallback: cari key yang ukurannya (num_classes, *)
+    if weight_key is None:
+        for k, v in state_dict.items():
+            if hasattr(v, "shape") and len(v.shape) == 2 and v.shape[0] == num_classes:
+                weight_key = k
+                break
+
+    if weight_key is None:
+        return model  # tidak ketemu, biarkan default
+
+    w = state_dict[weight_key]
+    out_features, in_features = w.shape
+
+    if arch == "densenet":
+        model.classifier = nn.Linear(in_features, out_features)
+
+    elif arch == "efficientnet_b0":
+        # classifier = Sequential(Dropout, Linear)
+        if isinstance(model.classifier, nn.Sequential) and len(model.classifier) >= 2:
+            model.classifier[1] = nn.Linear(in_features, out_features)
+        else:
+            model.classifier = nn.Sequential(nn.Dropout(0.2), nn.Linear(in_features, out_features))
+
+    elif arch == "mobilenet_v3":
+        # classifier = Sequential(..., Linear) biasanya index 3
+        if isinstance(model.classifier, nn.Sequential) and len(model.classifier) >= 4:
+            model.classifier[3] = nn.Linear(in_features, out_features)
+        else:
+            model.classifier = nn.Sequential(
+                nn.Linear(in_features, 1280),
+                nn.Hardswish(),
+                nn.Dropout(0.2),
+                nn.Linear(1280, out_features),
+            )
 
     return model
 
 # ======================
-# LOAD MODEL (FINAL)
+# BUILD BASE MODEL
+# ======================
+def build_base_model(arch):
+    if arch == "densenet":
+        m = models.densenet121(weights=None)
+        return m
+    if arch == "efficientnet_b0":
+        m = models.efficientnet_b0(weights=None)
+        return m
+    if arch == "mobilenet_v3":
+        m = models.mobilenet_v3_large(weights=None)
+        return m
+    return None
+
+# ======================
+# LOAD MODEL (ROBUST)
 # ======================
 @st.cache_resource
-def load_model(arch, method):
+def load_model(arch_ui, method):
 
-    path = f"models/{arch}_{method}.pth"
+    path = f"models/{arch_ui}_{method}.pth"
 
-    if not download_model(MODEL_LINKS[(arch, method)], path):
+    if not download_model(MODEL_LINKS[(arch_ui, method)], path):
         return None
 
-    # ======================
-    # 🔥 1. PRIORITAS FULL MODEL
-    # ======================
+    # 1) coba FULL MODEL
     try:
-        model = torch.load(path, map_location=device)
-
-        if hasattr(model, "eval"):
-            model.to(device)
-            model.eval()
-            return model
+        m = torch.load(path, map_location=device)
+        if hasattr(m, "eval"):
+            m.to(device).eval()
+            return m
     except:
         pass
 
-    # ======================
-    # 🔥 2. STATE_DICT (HARUS MATCH)
-    # ======================
+    # 2) state_dict
     try:
-        checkpoint = torch.load(path, map_location=device, weights_only=False)
-
-        if isinstance(checkpoint, dict):
-
-            if "model_state_dict" in checkpoint:
-                state_dict = checkpoint["model_state_dict"]
-            elif "state_dict" in checkpoint:
-                state_dict = checkpoint["state_dict"]
-            else:
-                state_dict = checkpoint
-
-        else:
+        ckpt = torch.load(path, map_location=device, weights_only=False)
+        sd = extract_state_dict(ckpt)
+        if sd is None:
             return None
 
-        model = build_model(arch)
+        # deteksi arsitektur DARI FILE (bukan dari dropdown)
+        arch = infer_arch_from_keys(sd)
+        if arch is None:
+            return None
 
-        # ❗ WAJIB MATCH (tidak pakai strict=False)
-        model.load_state_dict(state_dict, strict=True)
+        model = build_base_model(arch)
+        if model is None:
+            return None
 
-        model.to(device)
-        model.eval()
+        # sesuaikan classifier dengan bobot
+        model = adapt_classifier_from_state_dict(model, arch, sd, num_classes=len(class_names))
 
+        # sekarang harus bisa strict=True
+        model.load_state_dict(sd, strict=True)
+
+        model.to(device).eval()
         return model
 
-    except:
+    except Exception as e:
         return None
 
 # ======================
@@ -167,9 +238,6 @@ with col2:
 
 model = load_model(selected_model, selected_method)
 
-# ======================
-# UPLOAD
-# ======================
 uploaded_file = st.file_uploader("Upload gambar", type=["jpg","png","jpeg"])
 
 # ======================
@@ -187,19 +255,17 @@ if uploaded_file and model is not None:
     input_tensor = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        output = model(input_tensor)
-        probs = torch.softmax(output, dim=1)[0]
+        out = model(input_tensor)
+        probs = torch.softmax(out, dim=1)[0]
 
     probs_np = probs.cpu().numpy()
-    pred_class = np.argmax(probs_np)
+    pred_class = int(np.argmax(probs_np))
 
     with colB:
         st.success(class_names[pred_class])
         st.write(f"Confidence: {np.max(probs_np):.4f}")
 
-    # ======================
-    # GRAD-CAM
-    # ======================
+    # Grad-CAM
     st.divider()
     st.subheader("Grad-CAM")
 
@@ -221,13 +287,11 @@ if uploaded_file and model is not None:
         use_rgb=True
     )
 
-    col1, col2 = st.columns(2)
-
-    with col1:
+    c1, c2 = st.columns(2)
+    with c1:
         st.image(image, use_container_width=True)
-
-    with col2:
+    with c2:
         st.image(cam_image, use_container_width=True)
 
 elif uploaded_file and model is None:
-    st.warning("Model tidak dapat digunakan")
+    st.warning("Model tidak dapat digunakan (arsitektur/weight tidak cocok)")
