@@ -58,14 +58,16 @@ def download_model(file_id, output):
     return os.path.exists(output)
 
 # ======================
-# AUTO-DETECT & LOAD MODEL FIX
+# AUTO-DETECT & LOAD MODEL FIX (CACHE ISSUE RESOLVED)
 # ======================
 @st.cache_resource
 def load_model(arch, method):
 
-    path = f"models/{arch}_{method}.pth"
+    # MENGGUNAKAN FILE ID SEBAGAI NAMA FILE UNTUK MENGHINDARI CACHE LAMA
+    file_id = MODEL_LINKS[(arch, method)]
+    path = f"models/{file_id}.pth"
 
-    if not download_model(MODEL_LINKS[(arch, method)], path):
+    if not download_model(file_id, path):
         return None, None
 
     try:
