@@ -68,50 +68,65 @@ def load_model(arch, method):
         state_dict = torch.load(path, map_location=device)
 
         # ======================
-        # DENSENET
+        # 🔥 AUTO DETECT CLASSIFIER
+        # ======================
+        classifier_keys = [k for k in state_dict.keys() if "classifier" in k and "weight" in k]
+
+        if len(classifier_keys) == 0:
+            st.error("Classifier tidak ditemukan")
+            return None
+
+        # urutkan berdasarkan index
+        classifier_keys.sort()
+
+        # ======================
+        # BUILD BASE MODEL
         # ======================
         if arch == "DenseNet121":
             model = models.densenet121(weights=None)
 
-            # 🔥 CUSTOM CLASSIFIER (SEQUENTIAL)
-            if "classifier.0.weight" in state_dict:
-
-                fc1 = state_dict["classifier.0.weight"]
-                fc2 = state_dict["classifier.3.weight"]
-
-                model.classifier = nn.Sequential(
-                    nn.Linear(fc1.shape[1], fc1.shape[0]),
-                    nn.ReLU(),
-                    nn.Dropout(0.5),
-                    nn.Linear(fc2.shape[1], fc2.shape[0])
-                )
-
-            else:
-                fc = state_dict["classifier.weight"]
-                model.classifier = nn.Linear(fc.shape[1], fc.shape[0])
-
-        # ======================
-        # EFFICIENTNET
-        # ======================
         elif arch == "EfficientNetB0":
             model = models.efficientnet_b0(weights=None)
 
-            fc = state_dict["classifier.1.weight"]
-            model.classifier[1] = nn.Linear(fc.shape[1], fc.shape[0])
-
-        # ======================
-        # MOBILENET
-        # ======================
         elif arch == "MobileNetV3":
             model = models.mobilenet_v3_large(weights=None)
 
-            fc = state_dict["classifier.3.weight"]
-            model.classifier[3] = nn.Linear(fc.shape[1], fc.shape[0])
+        # ======================
+        # 🔥 BUILD CLASSIFIER DINAMIS
+        # ======================
+        layers = []
+
+        for key in classifier_keys:
+            w = state_dict[key]
+            out_f, in_f = w.shape
+
+            layers.append(nn.Linear(in_f, out_f))
+
+        # kalau lebih dari 1 layer → jadikan Sequential
+        if len(layers) > 1:
+            classifier = nn.Sequential(*layers)
+        else:
+            classifier = layers[0]
+
+        # assign ke model
+        if arch == "DenseNet121":
+            model.classifier = classifier
+
+        elif arch == "EfficientNetB0":
+            model.classifier = nn.Sequential(nn.Dropout(0.2), classifier)
+
+        elif arch == "MobileNetV3":
+            model.classifier = nn.Sequential(
+                nn.Linear(layers[0].in_features, layers[0].in_features),
+                nn.Hardswish(),
+                nn.Dropout(0.2),
+                classifier
+            )
 
         # ======================
-        # LOAD
+        # LOAD STATE_DICT
         # ======================
-        model.load_state_dict(state_dict, strict=True)
+        model.load_state_dict(state_dict, strict=False)
 
         model.to(device)
         model.eval()
