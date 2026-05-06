@@ -145,6 +145,27 @@ model = load_model(selected_model, selected_method)
 
 uploaded_file = st.file_uploader("Upload gambar", type=["jpg","png","jpeg"])
 
+if uploaded_file:
+    image = Image.open(uploaded_file).convert("RGB")
+
+    colA, colB = st.columns(2)
+
+    with colA:
+        st.image(image, caption="Input", use_container_width=True)
+
+    input_tensor = transform(image).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        output = model(input_tensor)
+        probs = torch.softmax(output, dim=1)[0]
+
+    probs_np = probs.cpu().numpy()
+    pred_class = np.argmax(probs_np)
+
+    with colB:
+        st.success(class_names[pred_class])
+        st.write(f"Confidence: {np.max(probs_np):.4f}")
+
 # ======================
 # PREDIKSI
 # ======================
@@ -173,7 +194,8 @@ if uploaded_file and model is not None:
     # ======================
     # GRADCAM
     # ======================
-    st.subheader("Grad-CAM")
+    st.divider()
+    st.subheader("🔥 Grad-CAM")
 
     try:
         target_layers = [model.features[-1]]
@@ -193,11 +215,27 @@ if uploaded_file and model is not None:
         use_rgb=True
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
+    col1, col2 = st.columns(2)
+
+    with col1:
         st.image(image, use_container_width=True)
-    with c2:
+
+    with col2:
         st.image(cam_image, use_container_width=True)
 
-elif uploaded_file and model is None:
-    st.warning("Model tidak dapat digunakan")
+    # ======================
+    # GRAFIK
+    # ======================
+    st.divider()
+
+    df = pd.DataFrame({
+        "Kelas": class_names,
+        "Prob": probs_np
+    })
+
+    chart = alt.Chart(df).mark_bar().encode(
+        x="Kelas",
+        y=alt.Y("Prob", scale=alt.Scale(domain=[0,1]))
+    )
+
+    st.altair_chart(chart, use_container_width=True)
