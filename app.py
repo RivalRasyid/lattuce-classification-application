@@ -28,7 +28,6 @@ class_names = ['Bacterial', 'Fungal', 'Healthy']
 # TRANSFORM (FIX UNTUK CONFIDENCE RENDAH)
 # ======================
 # Menggunakan Resize 256 dan CenterCrop 224 untuk mempertahankan aspect ratio
-# Ini adalah standar PyTorch dan alasan mengapa akurasi lokal lebih tinggi.
 transform = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -37,15 +36,15 @@ transform = transforms.Compose([
 ])
 
 # ======================
-# MODEL LINKS
+# MODEL LINKS (SUDAH DIREVISI MANUAL)
 # ======================
 MODEL_LINKS = {
     ("DenseNet121", "Full Freeze"): "1pFPV_4_jbJRltbNLopm88nvIVKCjPWlb",
-    ("DenseNet121", "Partial Unfreeze"): "1iAYtxo-cckCvQ7ROSh20pypVmEgs-tjs",
-    ("EfficientNetB0", "Full Freeze"): "1fofWMPyt81sOGDbubP10Ka1nxf2CAcCq",
-    ("EfficientNetB0", "Partial Unfreeze"): "1GlUrvPp_z7rXfR4qR6k1zBmu8ru7vHk3",
-    ("MobileNetV3", "Full Freeze"): "1R9L3lY2GtCSxksKptwT7B1sbz2DGGRcz",
-    ("MobileNetV3", "Partial Unfreeze"): "1lYYa9AyCjC2KUBYxLVP2i6NYERwCKQOK",
+    ("DenseNet121", "Partial Unfreeze"): "1lYYa9AyCjC2KUBYxLVP2i6NYERwCKQOK",
+    ("EfficientNetB0", "Full Freeze"): "1GlUrvPp_z7rXfR4qR6k1zBmu8ru7vHk3",
+    ("EfficientNetB0", "Partial Unfreeze"): "1iAYtxo-cckCvQ7ROSh20pypVmEgs-tjs",
+    ("MobileNetV3", "Full Freeze"): "1fofWMPyt81sOGDbubP10Ka1nxf2CAcCq",
+    ("MobileNetV3", "Partial Unfreeze"): "1R9L3lY2GtCSxksKptwT7B1sbz2DGGRcz",
 }
 
 # ======================
@@ -78,7 +77,6 @@ def load_model(arch, method):
             state_dict[k.replace("module.", "").replace("model.", "")] = v
 
         # 1. AUTO-DETECT ARSITEKTUR SEBENARNYA DARI BOBOT
-        # Ini mengatasi masalah link ID Google Drive yang tertukar
         actual_arch = arch
         if "features.conv0.weight" in state_dict:
             actual_arch = "DenseNet121"
@@ -194,7 +192,6 @@ if uploaded_file and model is not None:
     st.divider()
     st.markdown("### 🔥 Visualisasi Model (Grad-CAM)")
 
-    # Target layer spesifik yang bekerja untuk ketiga arsitektur
     target_layers = [model.features[-1]]
     cam = GradCAM(model=model, target_layers=target_layers)
 
