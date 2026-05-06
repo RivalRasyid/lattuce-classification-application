@@ -14,10 +14,12 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
 # ======================
-# FIX RANDOM
+# FIX RANDOM (STABIL)
 # ======================
 torch.manual_seed(42)
 np.random.seed(42)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 # ======================
 # CONFIG
@@ -60,10 +62,18 @@ def download_model(file_id, output):
     if not os.path.exists(output):
         gdown.download(url, output, quiet=False)
 
-    return os.path.exists(output)
+    if not os.path.exists(output):
+        return False
+
+    # validasi ukuran file
+    size = os.path.getsize(output)
+    if size < 5_000_000:
+        return False
+
+    return True
 
 # ======================
-# BUILD MODEL (FALLBACK)
+# BUILD MODEL (FALLBACK SAJA)
 # ======================
 def build_model(arch):
 
@@ -82,8 +92,9 @@ def build_model(arch):
     return model
 
 # ======================
-# LOAD MODEL (FINAL FIX)
+# LOAD MODEL (FINAL)
 # ======================
+@st.cache_resource
 def load_model(arch, method):
 
     path = f"models/{arch}_{method}.pth"
@@ -92,7 +103,7 @@ def load_model(arch, method):
         return None
 
     # ======================
-    # 🔥 PRIORITAS: FULL MODEL
+    # 🔥 1. PRIORITAS FULL MODEL
     # ======================
     try:
         model = torch.load(path, map_location=device)
@@ -105,7 +116,7 @@ def load_model(arch, method):
         pass
 
     # ======================
-    # 🔥 FALLBACK: STATE_DICT
+    # 🔥 2. STATE_DICT (HARUS MATCH)
     # ======================
     try:
         checkpoint = torch.load(path, map_location=device, weights_only=False)
@@ -124,7 +135,8 @@ def load_model(arch, method):
 
         model = build_model(arch)
 
-        model.load_state_dict(state_dict, strict=False)
+        # ❗ WAJIB MATCH (tidak pakai strict=False)
+        model.load_state_dict(state_dict, strict=True)
 
         model.to(device)
         model.eval()
@@ -218,4 +230,4 @@ if uploaded_file and model is not None:
         st.image(cam_image, use_container_width=True)
 
 elif uploaded_file and model is None:
-    st.warning("Model tidak bisa digunakan")
+    st.warning("Model tidak dapat digunakan")
