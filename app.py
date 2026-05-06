@@ -62,29 +62,59 @@ def load_model(arch, method):
     if not download_model(MODEL_LINKS[(arch, method)], path):
         return None
 
-    # ======================
-    # 1. TRY FULL MODEL
-    # ======================
     try:
-        model = torch.load(path, map_location=device)
+        state_dict = torch.load(path, map_location=device)
 
-        if hasattr(model, "eval"):
-            model.to(device)
-            model.eval()
-            return model
-    except:
-        pass
+        # ======================
+        # DENSENET (FIX SESUAI FILE KAMU)
+        # ======================
+        if arch == "DenseNet121":
 
-    # ======================
-    # 2. TRY STATE_DICT TANPA MODIFIKASI
-    # ======================
-    try:
-        checkpoint = torch.load(path, map_location=device, weights_only=False)
+            model = models.densenet121(weights=None)
 
-        # kalau cuma state_dict → TIDAK DIPAKSA
-        if isinstance(checkpoint, dict):
-            st.error("Model ini bukan full model. Tidak bisa digunakan tanpa arsitektur asli.")
-            return None
+            # 🔥 MODEL KAMU = classifier 2 layer
+            model.classifier = nn.Sequential(
+                nn.Linear(1024, 512),
+                nn.ReLU(),
+                nn.Dropout(0.5),
+                nn.Linear(512, 3)
+            )
+
+        # ======================
+        # EFFICIENTNET (DEFAULT TRAINING UMUM)
+        # ======================
+        elif arch == "EfficientNetB0":
+
+            model = models.efficientnet_b0(weights=None)
+
+            model.classifier = nn.Sequential(
+                nn.Dropout(0.2),
+                nn.Linear(1280, 3)
+            )
+
+        # ======================
+        # MOBILENET (DEFAULT TRAINING UMUM)
+        # ======================
+        elif arch == "MobileNetV3":
+
+            model = models.mobilenet_v3_large(weights=None)
+
+            model.classifier = nn.Sequential(
+                nn.Linear(960, 1280),
+                nn.Hardswish(),
+                nn.Dropout(0.2),
+                nn.Linear(1280, 3)
+            )
+
+        # ======================
+        # LOAD (WAJIB STRICT)
+        # ======================
+        model.load_state_dict(state_dict, strict=True)
+
+        model.to(device)
+        model.eval()
+
+        return model
 
     except Exception as e:
         st.error(f"Gagal load: {e}")
