@@ -25,9 +25,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class_names = ['Bacterial', 'Fungal', 'Healthy']
 
 # ======================
-# TRANSFORM (FIX UNTUK CONFIDENCE RENDAH)
+# TRANSFORM 
 # ======================
-# Menggunakan Resize 256 dan CenterCrop 224 untuk mempertahankan aspect ratio
 transform = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -36,7 +35,7 @@ transform = transforms.Compose([
 ])
 
 # ======================
-# MODEL LINKS (SUDAH DIREVISI MANUAL)
+# MODEL LINKS
 # ======================
 MODEL_LINKS = {
     ("DenseNet121", "Full Freeze"): "1pFPV_4_jbJRltbNLopm88nvIVKCjPWlb",
@@ -58,12 +57,10 @@ def download_model(file_id, output):
     return os.path.exists(output)
 
 # ======================
-# AUTO-DETECT & LOAD MODEL FIX (CACHE ISSUE RESOLVED)
+# LOAD MODEL
 # ======================
 @st.cache_resource
 def load_model(arch, method):
-
-    # MENGGUNAKAN FILE ID SEBAGAI NAMA FILE UNTUK MENGHINDARI CACHE LAMA
     file_id = MODEL_LINKS[(arch, method)]
     path = f"models/{file_id}.pth"
 
@@ -73,12 +70,10 @@ def load_model(arch, method):
     try:
         raw_state_dict = torch.load(path, map_location=device)
         
-        # Bersihkan keys
         state_dict = {}
         for k, v in raw_state_dict.items():
             state_dict[k.replace("module.", "").replace("model.", "")] = v
 
-        # 1. AUTO-DETECT ARSITEKTUR SEBENARNYA DARI BOBOT
         actual_arch = arch
         if "features.conv0.weight" in state_dict:
             actual_arch = "DenseNet121"
@@ -89,7 +84,6 @@ def load_model(arch, method):
             elif shape[0] == 16:
                 actual_arch = "MobileNetV3"
 
-        # 2. BANGUN MODEL SECARA DINAMIS
         if actual_arch == "DenseNet121":
             model = models.densenet121(weights=None)
             if "classifier.0.weight" in state_dict and "classifier.3.weight" in state_dict:
@@ -126,7 +120,6 @@ def load_model(arch, method):
                 w = state_dict["classifier.weight"]
                 model.classifier = nn.Linear(w.shape[1], w.shape[0])
 
-        # Load weights
         model.load_state_dict(state_dict, strict=False)
         model.to(device)
         model.eval()
@@ -138,7 +131,20 @@ def load_model(arch, method):
         return None, None
 
 # ======================
-# UI
+# SIDEBAR: FILTER GAMBAR
+# ======================
+st.sidebar.markdown("### ⚙️ Pengaturan Filter")
+confidence_threshold = st.sidebar.slider(
+    "Ambang Batas Keyakinan (Threshold)", 
+    min_value=0.50, 
+    max_value=0.99, 
+    value=0.80, 
+    step=0.01,
+    help="Tingkatkan nilai ini untuk memblokir gambar asing/bukan selada. Jika model memprediksi gambar dengan keyakinan di bawah nilai ini, gambar akan ditolak."
+)
+
+# ======================
+# UI UTAMA
 # ======================
 st.title("🌿 Klasifikasi Penyakit Daun Selada")
 
@@ -164,7 +170,7 @@ if actual_arch and actual_arch != selected_model:
 uploaded_file = st.file_uploader("Upload gambar", type=["jpg", "png", "jpeg"])
 
 # ======================
-# PREDIKSI
+# PREDIKSI & FILTERING
 # ======================
 if uploaded_file and model is not None:
 
@@ -183,71 +189,83 @@ if uploaded_file and model is not None:
 
     probs_np = probs.cpu().numpy()
     pred_class = int(np.argmax(probs_np))
+    max_confidence = np.max(probs_np)
 
-    with colB:
-        st.success(f"Prediksi: {class_names[pred_class]}")
-        st.write(f"Confidence: {np.max(probs_np):.4f}")
+    # LOGIKA FILTER: Cek apakah confidence mencapai batas minimum
+    if max_confidence < confidence_threshold:
+        with colB:
+            st.error("⚠️ Peringatan: Model tidak cukup yakin dengan gambar ini.")
+            st.write(f"Keyakinan tertinggi hanya **{max_confidence:.4f}** (di bawah ambang batas **{confidence_threshold:.2f}**).")
+            st.info("Kemungkinan besar ini adalah gambar acak, daun jenis lain (seperti tembakau), atau gambar terlalu buram/tidak fokus. Silakan unggah gambar daun selada yang jelas.")
+        
+        # Hentikan proses render grafik dan Grad-CAM jika gambar ditolak
+        st.stop()
+        
+    else:
+        with colB:
+            st.success(f"Prediksi: {class_names[pred_class]}")
+            st.write(f"Confidence: {max_confidence:.4f}")
 
-    # ======================
-    # GRAD-CAM
-    # ======================
-    st.divider()
-    st.markdown("### 🔥 Visualisasi Model (Grad-CAM)")
+        # ======================
+        # GRAD-CAM
+        # ======================
+        st.divider()
+        st.markdown("### 🔥 Visualisasi Model (Grad-CAM)")
 
-    target_layers = [model.features[-1]]
-    cam = GradCAM(model=model, target_layers=target_layers)
+        target_layers = [model.features[-1]]
+        cam = GradCAM(model=model, target_layers=target_layers)
 
-    grayscale_cam = cam(
-        input_tensor=input_tensor,
-        targets=[ClassifierOutputTarget(pred_class)]
-    )[0]
+        grayscale_cam = cam(
+            input_tensor=input_tensor,
+            targets=[ClassifierOutputTarget(pred_class)]
+        )[0]
 
-    img_np = np.array(image.resize((224, 224))).astype(np.float32) / 255
-    cam_image = show_cam_on_image(img_np, grayscale_cam, use_rgb=True)
+        img_np = np.array(image.resize((224, 224))).astype(np.float32) / 255
+        cam_image = show_cam_on_image(img_np, grayscale_cam, use_rgb=True)
 
-    col1, col2 = st.columns(2, gap="small")
+        col1, col2 = st.columns(2, gap="small")
 
-    with col1:
-        st.image(image.resize((224, 224)), caption="Original Resized", use_container_width=True)
+        with col1:
+            st.image(image.resize((224, 224)), caption="Original Resized", use_container_width=True)
 
-    with col2:
-        st.image(cam_image, caption="Area Fokus (Grad-CAM)", use_container_width=True)
+        with col2:
+            st.image(cam_image, caption="Area Fokus (Grad-CAM)", use_container_width=True)
 
-    # ======================
-    # GRAFIK MODERN
-    # ======================
-    st.divider()
-    st.markdown("### 📊 Probabilitas Klasifikasi")
+        # ======================
+        # GRAFIK MODERN
+        # ======================
+        st.divider()
+        st.markdown("### 📊 Probabilitas Klasifikasi")
 
-    df = pd.DataFrame({
-        "Kelas": class_names,
-        "Probabilitas": probs_np,
-        "Highlight": [
-            "Prediksi" if i == pred_class else "Lainnya"
-            for i in range(len(class_names))
-        ]
-    })
+        df = pd.DataFrame({
+            "Kelas": class_names,
+            "Probabilitas": probs_np,
+            "Highlight": [
+                "Prediksi" if i == pred_class else "Lainnya"
+                for i in range(len(class_names))
+            ]
+        })
 
-    chart = alt.Chart(df).mark_bar(
-        cornerRadiusTopLeft=12,
-        cornerRadiusTopRight=12
-    ).encode(
-        x=alt.X("Kelas", sort=None),
-        y=alt.Y("Probabilitas", scale=alt.Scale(domain=[0, 1])),
-        color=alt.Color(
-            "Highlight",
-            scale=alt.Scale(
-                domain=["Prediksi", "Lainnya"],
-                range=["#00FF9C", "#555555"]
+        chart = alt.Chart(df).mark_bar(
+            cornerRadiusTopLeft=12,
+            cornerRadiusTopRight=12
+        ).encode(
+            x=alt.X("Kelas", sort=None),
+            y=alt.Y("Probabilitas", scale=alt.Scale(domain=[0, 1])),
+            color=alt.Color(
+                "Highlight",
+                scale=alt.Scale(
+                    domain=["Prediksi", "Lainnya"],
+                    range=["#00FF9C", "#555555"]
+                ),
+                legend=None
             ),
-            legend=None
-        ),
-        tooltip=[
-            alt.Tooltip("Kelas"),
-            alt.Tooltip("Probabilitas", format=".4f")
-        ]
-    ).properties(
-        height=320
-    )
+            tooltip=[
+                alt.Tooltip("Kelas"),
+                alt.Tooltip("Probabilitas", format=".4f")
+            ]
+        ).properties(
+            height=320
+        )
 
-    st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, use_container_width=True)
