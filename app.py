@@ -25,10 +25,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class_names = ['Bacterial', 'Fungal', 'Healthy']
 
 # ======================
-# TRANSFORM
+# TRANSFORM (FIX UNTUK CONFIDENCE RENDAH)
 # ======================
+# Menggunakan Resize 256 dan CenterCrop 224 untuk mempertahankan aspect ratio
+# Ini adalah standar PyTorch dan alasan mengapa akurasi lokal lebih tinggi.
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize(256),
+    transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
@@ -56,7 +59,7 @@ def download_model(file_id, output):
     return os.path.exists(output)
 
 # ======================
-# LOAD MODEL FINAL FIX
+# AUTO-DETECT & LOAD MODEL FIX
 # ======================
 @st.cache_resource
 def load_model(arch, method):
@@ -64,82 +67,75 @@ def load_model(arch, method):
     path = f"models/{arch}_{method}.pth"
 
     if not download_model(MODEL_LINKS[(arch, method)], path):
-        return None
+        return None, None
 
     try:
         raw_state_dict = torch.load(path, map_location=device)
         
-        # Membersihkan prefix dari state_dict jika model di-save menggunakan DataParallel / wrapper lain
+        # Bersihkan keys
         state_dict = {}
         for k, v in raw_state_dict.items():
-            clean_key = k.replace("module.", "").replace("model.", "")
-            state_dict[clean_key] = v
+            state_dict[k.replace("module.", "").replace("model.", "")] = v
 
-        num_classes = len(class_names)
+        # 1. AUTO-DETECT ARSITEKTUR SEBENARNYA DARI BOBOT
+        # Ini mengatasi masalah link ID Google Drive yang tertukar
+        actual_arch = arch
+        if "features.conv0.weight" in state_dict:
+            actual_arch = "DenseNet121"
+        elif "features.0.0.weight" in state_dict:
+            shape = state_dict["features.0.0.weight"].shape
+            if shape[0] == 32:
+                actual_arch = "EfficientNetB0"
+            elif shape[0] == 16:
+                actual_arch = "MobileNetV3"
 
-        # ======================
-        # DENSENET
-        # ======================
-        if arch == "DenseNet121":
+        # 2. BANGUN MODEL SECARA DINAMIS
+        if actual_arch == "DenseNet121":
             model = models.densenet121(weights=None)
-            in_features = model.classifier.in_features # Umumnya 1024
-            
-            # Deteksi Custom Classifier
             if "classifier.0.weight" in state_dict and "classifier.3.weight" in state_dict:
-                hidden_out = state_dict["classifier.0.weight"].shape[0]
+                w1 = state_dict["classifier.0.weight"]
+                w2 = state_dict["classifier.3.weight"]
                 model.classifier = nn.Sequential(
-                    nn.Linear(in_features, hidden_out),
+                    nn.Linear(w1.shape[1], w1.shape[0]),
                     nn.ReLU(),
                     nn.Dropout(0.5),
-                    nn.Linear(hidden_out, num_classes)
+                    nn.Linear(w2.shape[1], w2.shape[0])
                 )
-            else:
-                model.classifier = nn.Linear(in_features, num_classes)
+            elif "classifier.weight" in state_dict:
+                w = state_dict["classifier.weight"]
+                model.classifier = nn.Linear(w.shape[1], w.shape[0])
 
-        # ======================
-        # EFFICIENTNET
-        # ======================
-        elif arch == "EfficientNetB0":
+        elif actual_arch == "EfficientNetB0":
             model = models.efficientnet_b0(weights=None)
-            in_features = model.classifier[1].in_features # Umumnya 1280
-            
-            # Adaptasi berdasarkan kemungkinan modifikasi classifier saat training
             if "classifier.1.weight" in state_dict:
-                model.classifier[1] = nn.Linear(in_features, num_classes)
+                w = state_dict["classifier.1.weight"]
+                model.classifier[1] = nn.Linear(w.shape[1], w.shape[0])
             elif "classifier.weight" in state_dict:
-                model.classifier = nn.Linear(in_features, num_classes)
-            else:
-                model.classifier[1] = nn.Linear(in_features, num_classes)
+                w = state_dict["classifier.weight"]
+                model.classifier = nn.Linear(w.shape[1], w.shape[0])
 
-        # ======================
-        # MOBILENET
-        # ======================
-        elif arch == "MobileNetV3":
+        elif actual_arch == "MobileNetV3":
             model = models.mobilenet_v3_large(weights=None)
-            in_features = model.classifier[3].in_features # Umumnya 1280
-            
+            if "classifier.0.weight" in state_dict:
+                w0 = state_dict["classifier.0.weight"]
+                model.classifier[0] = nn.Linear(w0.shape[1], w0.shape[0])
             if "classifier.3.weight" in state_dict:
-                model.classifier[3] = nn.Linear(in_features, num_classes)
+                w3 = state_dict["classifier.3.weight"]
+                model.classifier[3] = nn.Linear(w3.shape[1], w3.shape[0])
             elif "classifier.weight" in state_dict:
-                # Jika user mengganti keseluruhan nn.Sequential classifier dengan nn.Linear
-                model.classifier = nn.Linear(960, num_classes)
-            else:
-                model.classifier[3] = nn.Linear(in_features, num_classes)
+                w = state_dict["classifier.weight"]
+                model.classifier = nn.Linear(w.shape[1], w.shape[0])
 
-        # ======================
-        # LOAD
-        # ======================
-        # Menggunakan strict=False agar aman dari key mismatch minor
+        # Load weights
         model.load_state_dict(state_dict, strict=False)
-
         model.to(device)
         model.eval()
 
-        return model
+        return model, actual_arch
 
     except Exception as e:
-        st.error(f"Gagal load state_dict untuk {arch}: {e}")
-        return None
+        st.error(f"Gagal memuat model: {e}")
+        return None, None
 
 # ======================
 # UI
@@ -150,7 +146,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     selected_model = st.selectbox(
-        "Arsitektur",
+        "Arsitektur Target",
         ["DenseNet121", "EfficientNetB0", "MobileNetV3"]
     )
 
@@ -160,7 +156,10 @@ with col2:
         ["Full Freeze", "Partial Unfreeze"]
     )
 
-model = load_model(selected_model, selected_method)
+model, actual_arch = load_model(selected_model, selected_method)
+
+if actual_arch and actual_arch != selected_model:
+    st.warning(f"Terdeteksi link model tertukar! Arsitektur yang sedang digunakan (dibaca dari file) adalah: **{actual_arch}**")
 
 uploaded_file = st.file_uploader("Upload gambar", type=["jpg", "png", "jpeg"])
 
@@ -174,7 +173,7 @@ if uploaded_file and model is not None:
     colA, colB = st.columns(2)
 
     with colA:
-        st.image(image, caption="Input", use_container_width=True)
+        st.image(image, caption="Input Gambar", use_container_width=True)
 
     input_tensor = transform(image).unsqueeze(0).to(device)
 
@@ -186,7 +185,7 @@ if uploaded_file and model is not None:
     pred_class = int(np.argmax(probs_np))
 
     with colB:
-        st.success(class_names[pred_class])
+        st.success(f"Prediksi: {class_names[pred_class]}")
         st.write(f"Confidence: {np.max(probs_np):.4f}")
 
     # ======================
@@ -195,6 +194,7 @@ if uploaded_file and model is not None:
     st.divider()
     st.markdown("### 🔥 Visualisasi Model (Grad-CAM)")
 
+    # Target layer spesifik yang bekerja untuk ketiga arsitektur
     target_layers = [model.features[-1]]
     cam = GradCAM(model=model, target_layers=target_layers)
 
@@ -209,10 +209,10 @@ if uploaded_file and model is not None:
     col1, col2 = st.columns(2, gap="small")
 
     with col1:
-        st.image(image, caption="Original", use_container_width=True)
+        st.image(image.resize((224, 224)), caption="Original Resized", use_container_width=True)
 
     with col2:
-        st.image(cam_image, caption="Grad-CAM", use_container_width=True)
+        st.image(cam_image, caption="Area Fokus (Grad-CAM)", use_container_width=True)
 
     # ======================
     # GRAFIK MODERN
