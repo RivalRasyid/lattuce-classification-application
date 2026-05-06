@@ -184,41 +184,48 @@ def load_model(arch, method):
         state_dict = torch.load(path, map_location=device)
 
         # ======================
-        # 🔥 KHUSUS DENSENET
+        # 🔥 CARI LAYER CLASSIFIER OTOMATIS
+        # ======================
+        fc_weight_key = None
+
+        for key in state_dict.keys():
+            if "classifier" in key and "weight" in key:
+                fc_weight_key = key
+                break
+
+        if fc_weight_key is None:
+            # fallback cari fc
+            for key in state_dict.keys():
+                if "fc" in key and "weight" in key:
+                    fc_weight_key = key
+                    break
+
+        if fc_weight_key is None:
+            st.error("Tidak ditemukan layer classifier")
+            return None
+
+        weight = state_dict[fc_weight_key]
+
+        out_features = weight.shape[0]
+        in_features = weight.shape[1]
+
+        # ======================
+        # BUILD MODEL
         # ======================
         if arch == "DenseNet121":
             model = models.densenet121(weights=None)
-
-            # 🔥 SESUAIKAN CLASSIFIER DARI WEIGHT
-            in_features = state_dict["classifier.weight"].shape[1]
-            out_features = state_dict["classifier.weight"].shape[0]
-
             model.classifier = nn.Linear(in_features, out_features)
 
-        # ======================
-        # 🔥 EFFICIENTNET
-        # ======================
         elif arch == "EfficientNetB0":
             model = models.efficientnet_b0(weights=None)
-
-            in_features = state_dict["classifier.1.weight"].shape[1]
-            out_features = state_dict["classifier.1.weight"].shape[0]
-
             model.classifier[1] = nn.Linear(in_features, out_features)
 
-        # ======================
-        # 🔥 MOBILENET
-        # ======================
         elif arch == "MobileNetV3":
             model = models.mobilenet_v3_large(weights=None)
-
-            in_features = state_dict["classifier.3.weight"].shape[1]
-            out_features = state_dict["classifier.3.weight"].shape[0]
-
             model.classifier[3] = nn.Linear(in_features, out_features)
 
         # ======================
-        # LOAD (WAJIB STRICT TRUE)
+        # LOAD
         # ======================
         model.load_state_dict(state_dict, strict=True)
 
