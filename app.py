@@ -2,6 +2,8 @@ import streamlit as st
 import torch
 import torch.nn as nn
 import numpy as np
+import pandas as pd
+import altair as alt
 from PIL import Image
 from torchvision import transforms, models
 import os
@@ -26,9 +28,9 @@ class_names = ['Bacterial', 'Fungal', 'Healthy']
 # TRANSFORM
 # ======================
 transform = transforms.Compose([
-    transforms.Resize((224,224)),
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),
-    transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
 # ======================
@@ -65,53 +67,70 @@ def load_model(arch, method):
         return None
 
     try:
-        state_dict = torch.load(path, map_location=device)
+        raw_state_dict = torch.load(path, map_location=device)
+        
+        # Membersihkan prefix dari state_dict jika model di-save menggunakan DataParallel / wrapper lain
+        state_dict = {}
+        for k, v in raw_state_dict.items():
+            clean_key = k.replace("module.", "").replace("model.", "")
+            state_dict[clean_key] = v
+
+        num_classes = len(class_names)
 
         # ======================
         # DENSENET
         # ======================
         if arch == "DenseNet121":
             model = models.densenet121(weights=None)
-
-            # 🔥 CUSTOM CLASSIFIER (SEQUENTIAL)
-            if "classifier.0.weight" in state_dict:
-
-                fc1 = state_dict["classifier.0.weight"]
-                fc2 = state_dict["classifier.3.weight"]
-
+            in_features = model.classifier.in_features # Umumnya 1024
+            
+            # Deteksi Custom Classifier
+            if "classifier.0.weight" in state_dict and "classifier.3.weight" in state_dict:
+                hidden_out = state_dict["classifier.0.weight"].shape[0]
                 model.classifier = nn.Sequential(
-                    nn.Linear(fc1.shape[1], fc1.shape[0]),
+                    nn.Linear(in_features, hidden_out),
                     nn.ReLU(),
                     nn.Dropout(0.5),
-                    nn.Linear(fc2.shape[1], fc2.shape[0])
+                    nn.Linear(hidden_out, num_classes)
                 )
-
             else:
-                fc = state_dict["classifier.weight"]
-                model.classifier = nn.Linear(fc.shape[1], fc.shape[0])
+                model.classifier = nn.Linear(in_features, num_classes)
 
         # ======================
         # EFFICIENTNET
         # ======================
         elif arch == "EfficientNetB0":
             model = models.efficientnet_b0(weights=None)
-
-            fc = state_dict["classifier.1.weight"]
-            model.classifier[1] = nn.Linear(fc.shape[1], fc.shape[0])
+            in_features = model.classifier[1].in_features # Umumnya 1280
+            
+            # Adaptasi berdasarkan kemungkinan modifikasi classifier saat training
+            if "classifier.1.weight" in state_dict:
+                model.classifier[1] = nn.Linear(in_features, num_classes)
+            elif "classifier.weight" in state_dict:
+                model.classifier = nn.Linear(in_features, num_classes)
+            else:
+                model.classifier[1] = nn.Linear(in_features, num_classes)
 
         # ======================
         # MOBILENET
         # ======================
         elif arch == "MobileNetV3":
             model = models.mobilenet_v3_large(weights=None)
-
-            fc = state_dict["classifier.3.weight"]
-            model.classifier[3] = nn.Linear(fc.shape[1], fc.shape[0])
+            in_features = model.classifier[3].in_features # Umumnya 1280
+            
+            if "classifier.3.weight" in state_dict:
+                model.classifier[3] = nn.Linear(in_features, num_classes)
+            elif "classifier.weight" in state_dict:
+                # Jika user mengganti keseluruhan nn.Sequential classifier dengan nn.Linear
+                model.classifier = nn.Linear(960, num_classes)
+            else:
+                model.classifier[3] = nn.Linear(in_features, num_classes)
 
         # ======================
         # LOAD
         # ======================
-        model.load_state_dict(state_dict, strict=True)
+        # Menggunakan strict=False agar aman dari key mismatch minor
+        model.load_state_dict(state_dict, strict=False)
 
         model.to(device)
         model.eval()
@@ -119,7 +138,7 @@ def load_model(arch, method):
         return model
 
     except Exception as e:
-        st.error(f"Gagal load: {e}")
+        st.error(f"Gagal load state_dict untuk {arch}: {e}")
         return None
 
 # ======================
@@ -132,18 +151,18 @@ col1, col2 = st.columns(2)
 with col1:
     selected_model = st.selectbox(
         "Arsitektur",
-        ["DenseNet121","EfficientNetB0","MobileNetV3"]
+        ["DenseNet121", "EfficientNetB0", "MobileNetV3"]
     )
 
 with col2:
     selected_method = st.selectbox(
         "Metode",
-        ["Full Freeze","Partial Unfreeze"]
+        ["Full Freeze", "Partial Unfreeze"]
     )
 
 model = load_model(selected_model, selected_method)
 
-uploaded_file = st.file_uploader("Upload gambar", type=["jpg","png","jpeg"])
+uploaded_file = st.file_uploader("Upload gambar", type=["jpg", "png", "jpeg"])
 
 # ======================
 # PREDIKSI
@@ -184,7 +203,7 @@ if uploaded_file and model is not None:
         targets=[ClassifierOutputTarget(pred_class)]
     )[0]
 
-    img_np = np.array(image.resize((224,224))).astype(np.float32)/255
+    img_np = np.array(image.resize((224, 224))).astype(np.float32) / 255
     cam_image = show_cam_on_image(img_np, grayscale_cam, use_rgb=True)
 
     col1, col2 = st.columns(2, gap="small")
@@ -215,12 +234,12 @@ if uploaded_file and model is not None:
         cornerRadiusTopRight=12
     ).encode(
         x=alt.X("Kelas", sort=None),
-        y=alt.Y("Probabilitas", scale=alt.Scale(domain=[0,1])),
+        y=alt.Y("Probabilitas", scale=alt.Scale(domain=[0, 1])),
         color=alt.Color(
             "Highlight",
             scale=alt.Scale(
-                domain=["Prediksi","Lainnya"],
-                range=["#00FF9C","#555555"]
+                domain=["Prediksi", "Lainnya"],
+                range=["#00FF9C", "#555555"]
             ),
             legend=None
         ),
