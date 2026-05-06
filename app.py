@@ -172,7 +172,6 @@ def build_base_model(arch):
 # ======================
 # LOAD MODEL (ROBUST)
 # ======================
-@st.cache_resource
 def load_model(arch, method):
 
     path = f"models/{arch}_{method}.pth"
