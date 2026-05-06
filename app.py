@@ -1,8 +1,9 @@
 import streamlit as st
 import torch
+import torch.nn as nn
 import numpy as np
 from PIL import Image
-from torchvision import transforms
+from torchvision import transforms, models
 import os
 import gdown
 
@@ -11,8 +12,11 @@ from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
 # ======================
-# CONFIG
+# STABIL
 # ======================
+torch.manual_seed(42)
+np.random.seed(42)
+
 st.set_page_config(page_title="Selada Classifier", layout="wide")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -40,19 +44,17 @@ MODEL_LINKS = {
 }
 
 # ======================
-# DOWNLOAD MODEL
+# DOWNLOAD
 # ======================
 def download_model(file_id, output):
     os.makedirs("models", exist_ok=True)
     url = f"https://drive.google.com/uc?id={file_id}"
-
     if not os.path.exists(output):
         gdown.download(url, output, quiet=False)
-
     return os.path.exists(output)
 
 # ======================
-# LOAD MODEL (FINAL CLEAN)
+# LOAD MODEL FINAL FIX
 # ======================
 @st.cache_resource
 def load_model(arch, method):
@@ -66,48 +68,48 @@ def load_model(arch, method):
         state_dict = torch.load(path, map_location=device)
 
         # ======================
-        # DENSENET (FIX SESUAI FILE KAMU)
+        # DENSENET
         # ======================
         if arch == "DenseNet121":
-
             model = models.densenet121(weights=None)
 
-            # 🔥 MODEL KAMU = classifier 2 layer
-            model.classifier = nn.Sequential(
-                nn.Linear(1024, 512),
-                nn.ReLU(),
-                nn.Dropout(0.5),
-                nn.Linear(512, 3)
-            )
+            # 🔥 CUSTOM CLASSIFIER (SEQUENTIAL)
+            if "classifier.0.weight" in state_dict:
+
+                fc1 = state_dict["classifier.0.weight"]
+                fc2 = state_dict["classifier.3.weight"]
+
+                model.classifier = nn.Sequential(
+                    nn.Linear(fc1.shape[1], fc1.shape[0]),
+                    nn.ReLU(),
+                    nn.Dropout(0.5),
+                    nn.Linear(fc2.shape[1], fc2.shape[0])
+                )
+
+            else:
+                fc = state_dict["classifier.weight"]
+                model.classifier = nn.Linear(fc.shape[1], fc.shape[0])
 
         # ======================
-        # EFFICIENTNET (DEFAULT TRAINING UMUM)
+        # EFFICIENTNET
         # ======================
         elif arch == "EfficientNetB0":
-
             model = models.efficientnet_b0(weights=None)
 
-            model.classifier = nn.Sequential(
-                nn.Dropout(0.2),
-                nn.Linear(1280, 3)
-            )
+            fc = state_dict["classifier.1.weight"]
+            model.classifier[1] = nn.Linear(fc.shape[1], fc.shape[0])
 
         # ======================
-        # MOBILENET (DEFAULT TRAINING UMUM)
+        # MOBILENET
         # ======================
         elif arch == "MobileNetV3":
-
             model = models.mobilenet_v3_large(weights=None)
 
-            model.classifier = nn.Sequential(
-                nn.Linear(960, 1280),
-                nn.Hardswish(),
-                nn.Dropout(0.2),
-                nn.Linear(1280, 3)
-            )
+            fc = state_dict["classifier.3.weight"]
+            model.classifier[3] = nn.Linear(fc.shape[1], fc.shape[0])
 
         # ======================
-        # LOAD (WAJIB STRICT)
+        # LOAD
         # ======================
         model.load_state_dict(state_dict, strict=True)
 
@@ -158,8 +160,8 @@ if uploaded_file and model is not None:
     input_tensor = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        output = model(input_tensor)
-        probs = torch.softmax(output, dim=1)[0]
+        out = model(input_tensor)
+        probs = torch.softmax(out, dim=1)[0]
 
     probs_np = probs.cpu().numpy()
     pred_class = int(np.argmax(probs_np))
