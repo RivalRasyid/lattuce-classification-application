@@ -192,16 +192,12 @@ if uploaded_file and model is not None:
         st.write(f"Confidence: {np.max(probs_np):.4f}")
 
     # ======================
-    # GRADCAM
+    # GRAD-CAM
     # ======================
     st.divider()
-    st.subheader("Grad-CAM")
+    st.markdown("### 🔥 Visualisasi Model (Grad-CAM)")
 
-    try:
-        target_layers = [model.features[-1]]
-    except:
-        target_layers = [list(model.children())[-1]]
-
+    target_layers = [model.features[-1]]
     cam = GradCAM(model=model, target_layers=target_layers)
 
     grayscale_cam = cam(
@@ -209,19 +205,52 @@ if uploaded_file and model is not None:
         targets=[ClassifierOutputTarget(pred_class)]
     )[0]
 
-    cam_image = show_cam_on_image(
-        np.array(image.resize((224,224))).astype(np.float32)/255,
-        grayscale_cam,
-        use_rgb=True
-    )
+    img_np = np.array(image.resize((224,224))).astype(np.float32)/255
+    cam_image = show_cam_on_image(img_np, grayscale_cam, use_rgb=True)
 
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2, gap="small")
 
     with col1:
-        st.image(image, use_container_width=True)
+        st.image(image, caption="Original", use_container_width=True)
 
     with col2:
-        st.image(cam_image, use_container_width=True)
+        st.image(cam_image, caption="Grad-CAM", use_container_width=True)
 
-elif uploaded_file and model is None:
-    st.warning("Model tidak dapat digunakan")
+    # ======================
+    # GRAFIK MODERN
+    # ======================
+    st.divider()
+    st.markdown("### 📊 Probabilitas Klasifikasi")
+
+    df = pd.DataFrame({
+        "Kelas": class_names,
+        "Probabilitas": probs_np,
+        "Highlight": [
+            "Prediksi" if i == pred_class else "Lainnya"
+            for i in range(len(class_names))
+        ]
+    })
+
+    chart = alt.Chart(df).mark_bar(
+        cornerRadiusTopLeft=12,
+        cornerRadiusTopRight=12
+    ).encode(
+        x=alt.X("Kelas", sort=None),
+        y=alt.Y("Probabilitas", scale=alt.Scale(domain=[0,1])),
+        color=alt.Color(
+            "Highlight",
+            scale=alt.Scale(
+                domain=["Prediksi","Lainnya"],
+                range=["#00FF9C","#555555"]
+            ),
+            legend=None
+        ),
+        tooltip=[
+            alt.Tooltip("Kelas"),
+            alt.Tooltip("Probabilitas", format=".4f")
+        ]
+    ).properties(
+        height=320
+    )
+
+    st.altair_chart(chart, use_container_width=True)
