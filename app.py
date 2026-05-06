@@ -194,7 +194,7 @@ if uploaded_file and model is not None:
     # ======================
     # GRADCAM
     # ======================
-   st.divider()
+    st.divider()
     st.subheader("Grad-CAM")
 
     try:
