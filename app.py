@@ -194,8 +194,8 @@ if uploaded_file and model is not None:
     # ======================
     # GRADCAM
     # ======================
-    st.divider()
-    st.subheader("🔥 Grad-CAM")
+   st.divider()
+    st.subheader("Grad-CAM")
 
     try:
         target_layers = [model.features[-1]]
@@ -223,19 +223,5 @@ if uploaded_file and model is not None:
     with col2:
         st.image(cam_image, use_container_width=True)
 
-    # ======================
-    # GRAFIK
-    # ======================
-    st.divider()
-
-    df = pd.DataFrame({
-        "Kelas": class_names,
-        "Prob": probs_np
-    })
-
-    chart = alt.Chart(df).mark_bar().encode(
-        x="Kelas",
-        y=alt.Y("Prob", scale=alt.Scale(domain=[0,1]))
-    )
-
-    st.altair_chart(chart, use_container_width=True)
+elif uploaded_file and model is None:
+    st.warning("Model tidak dapat digunakan")
