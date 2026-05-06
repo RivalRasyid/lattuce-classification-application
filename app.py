@@ -145,27 +145,6 @@ model = load_model(selected_model, selected_method)
 
 uploaded_file = st.file_uploader("Upload gambar", type=["jpg","png","jpeg"])
 
-if uploaded_file:
-    image = Image.open(uploaded_file).convert("RGB")
-
-    colA, colB = st.columns(2)
-
-    with colA:
-        st.image(image, caption="Input", use_container_width=True)
-
-    input_tensor = transform(image).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        output = model(input_tensor)
-        probs = torch.softmax(output, dim=1)[0]
-
-    probs_np = probs.cpu().numpy()
-    pred_class = np.argmax(probs_np)
-
-    with colB:
-        st.success(class_names[pred_class])
-        st.write(f"Confidence: {np.max(probs_np):.4f}")
-
 # ======================
 # PREDIKSI
 # ======================
